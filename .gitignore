@@ -1,0 +1,4 @@
+# Datos de cada usuario: se crean al usar el programa / Per-user data created at runtime
+settings.json
+history.json
+__pycache__/
