@@ -110,6 +110,7 @@ No hay ninguna fuente gratuita con el historial de los servidores de DayZ, así 
 - **El ping real también puede engañar a veces**: algún servidor con protección podría responder al ping desde un punto cercano. Si un servidor parece demasiado bueno, compáralo con el ping dentro del juego.
 - Solo se muestran servidores con al menos un jugador.
 - Los datos vienen de la API pública de DZSA Launcher, que no es oficial ni está documentada: si cambia, el programa podría dejar de cargar la lista.
+- **Uso responsable de la API de DZSA**: el programa usa primero la lista que ya guardó DZSA Launcher y solo descarga una nueva si tiene más de 30 minutos (comprimida, ~2,4 MB). Consulta servidores sueltos solo cuando lo pides (detalles, ↻, F5), con un máximo de 4 a la vez, y se identifica con su nombre y el enlace a este repositorio. Si eres de DZSA y quieres que algo cambie, abre un *issue*.
 - Al cerrar la ventana el programa termina por completo.
 
 ### Archivos que crea
@@ -240,6 +241,7 @@ There is no free source of DayZ server history, so the program **builds its own*
 - **The real ping can occasionally mislead too**: a protected server might answer ping from a nearby point. If a server looks too good, compare it with the in-game ping.
 - Only servers with at least one player are shown.
 - The data comes from DZSA Launcher's public API, which is neither official nor documented: if it changes, the program might stop loading the list.
+- **Responsible use of DZSA's API**: the program first uses the list DZSA Launcher already saved and only downloads a new one if it is older than 30 minutes (compressed, ~2.4 MB). It queries single servers only when you ask (details, ↻, F5), at most 4 at a time, and identifies itself with its name and a link to this repository. If you're from DZSA and want something changed, please open an issue.
 - Closing the window ends the program completely.
 
 ### Files it creates

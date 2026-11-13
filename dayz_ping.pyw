@@ -3,7 +3,7 @@
 El ping del launcher mide la consulta A2S, que a veces contesta un filtro anti-DDoS cercano
 en vez del servidor; el ICMP llega al servidor de verdad. Al cerrar la ventana el proceso termina.
 """
-import ctypes, json, os, queue, socket, struct, sys, threading, time, urllib.request, winreg
+import ctypes, gzip, json, os, queue, socket, struct, sys, threading, time, urllib.request, winreg
 import tkinter as tk
 from collections import Counter, namedtuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -100,9 +100,13 @@ def ping(ip, timeout_ms=1000):
 
 
 def fetch_json(url, timeout):
-    req = urllib.request.Request(url, headers={'User-Agent': 'DayZPing/1.0'})  # DZSA da 403 al agente de Python
+    """GET a la API de DZSA: se identifica con el nombre y la web del programa y pide la respuesta comprimida."""
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'dayz-real-ping-browser/1.0 (+https://github.com/pepperoniego1247/dayz-real-ping-browser)',
+        'Accept-Encoding': 'gzip'})  # la lista pasa de ~15 MB a ~2,4 MB
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
+        body = r.read()
+        return json.loads(gzip.decompress(body) if r.headers.get('Content-Encoding') == 'gzip' else body)
 
 
 def mod_key(m):
@@ -206,6 +210,7 @@ class App:
         self.sort, self.src, self.total, self.shown, self.done = [('players', True)], '', 0, 0, False
         self.maps, self.modlist, self.req, self.exc, self.picker, self.i18n = [], [], set(), set(), None, []
         self.hist, self.act, self.subwins, self.refreshing = [], {}, {}, set()
+        self.refresh_pool = ThreadPoolExecutor(4)  # F5 con muchas filas: como mucho 4 consultas a DZSA a la vez
         try:
             with open(SETTINGS, encoding='utf-8') as f:
                 cfg = json.load(f)
@@ -607,7 +612,7 @@ class App:
                 self.redraw_server(i)
             self.q.put(('ping', s.ip, ms))  # también las otras filas con la misma IP
             self.q.put(('call', done))
-        threading.Thread(target=work, daemon=True).start()
+        self.refresh_pool.submit(work)
 
     def refresh_selected(self):
         for iid in self.tree.selection():
