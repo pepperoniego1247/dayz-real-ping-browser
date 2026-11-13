@@ -19,9 +19,9 @@ Server = namedtuple('Server', 'name map players max ip port fpp mods password of
 COLS = {'ping': 90, 'players': 90, 'act': 100, 'name': 400, 'map': 120, 'fpp': 60, 'mods': 60, 'addr': 170}  # ancho
 THEMES = {
     'dark': dict(bg='#1e1f22', field='#2b2d31', head='#313338', line='#45474d', fg='#e3e3e3', accent='#5b8def',
-                 sel='#35507a', selfg='#ffffff', good='#4ade80', mid='#facc15', bad='#f87171'),
+                 sel='#35507a', selfg='#ffffff', good='#4ade80', mid='#facc15', bad='#f87171', approx='#8b9098'),
     'light': dict(bg='#f3f3f3', field='#ffffff', head='#e6e6e6', line='#c4c4c4', fg='#1f1f1f', accent='#2f6fd6',
-                  sel='#cfe3ff', selfg='#000000', good='#1a7f37', mid='#9a6700', bad='#cf222e'),
+                  sel='#cfe3ff', selfg='#000000', good='#1a7f37', mid='#9a6700', bad='#cf222e', approx='#7a7f87'),
 }
 TEXT = {  # clave: (español, inglés)
     'title': ('DayZ - ping real', 'DayZ - real ping'),
@@ -39,11 +39,15 @@ TEXT = {  # clave: (español, inglés)
     'hint': ('Doble clic: detalles · Clic derecho o F5: refrescar la fila (ping, jugadores…) · Clic en una columna: '
              'ordenar · Shift+clic: añadir otra (Ping y luego Jugadores = menos ping y, en cada tramo de 20 ms, más '
              'llenos) · Actividad: media de jugadores en 7 días, según las veces que abriste el programa '
-             '(Alta 30+, Media 10+, Baja 1+)',
+             '(Alta 30+, Media 10+, Baja 1+) · ≈ en gris: el servidor bloquea el ping real; es el ping del launcher '
+             'y puede ser menor que el real',
              'Double-click: details · Right-click or F5: refresh the row (ping, players…) · Click a column: sort · '
              'Shift+click: add another (Ping then Players = lowest ping and, within each 20 ms band, the fullest) · '
              'Activity: average players over 7 days, from the times you opened the program (High 30+, Medium 10+, '
-             'Low 1+)'),
+             'Low 1+) · ≈ in grey: the server blocks the real ping; it is the launcher ping and may be lower than '
+             'the real one'),
+    'd_approx': ('ping del launcher: este servidor bloquea el ping real, puede ser menor',
+                 'launcher ping: this server blocks the real ping, it may be lower'),
     'm_refresh': ('↻ Refrescar', '↻ Refresh'), 'm_details': ('Detalles', 'Details'),
     'status': ('{} de {} servidores · {} · ping {}/{}', '{} of {} servers · {} · ping {}/{}'),
     'cache': ('lista del launcher', "launcher's list"), 'download': ('lista descargada', 'downloaded list'),
@@ -91,12 +95,32 @@ def ping(ip, timeout_ms=1000):
     """RTT ICMP en ms, o None si no responde (un 20 % de servidores bloquea el ping)."""
     if not hasattr(_local, 'h'):
         _local.h = icmp.IcmpCreateFile()  # un handle por hilo
-    addr = struct.unpack('<I', socket.inet_aton(ip))[0]
+    try:
+        addr = struct.unpack('<I', socket.inet_aton(ip))[0]
+    except OSError:
+        return None  # IP mal formada en la lista: un error aquí cortaría toda la medición
     buf = ctypes.create_string_buffer(128)
     if not icmp.IcmpSendEcho(_local.h, addr, b'dayzping', 8, None, buf, len(buf), timeout_ms):
         return None
     status, rtt = struct.unpack_from('<II', buf, 4)  # ICMP_ECHO_REPLY.Status, .RoundTripTime
     return rtt if status == 0 else None
+
+
+def a2s_ping(ip, qport, timeout=1.0):
+    """El ping del launcher: lo que tarda en contestar la consulta A2S_INFO al puerto de consulta.
+
+    Solo se usa si el servidor bloquea el ICMP. Puede ser menor que el real: a veces contesta un filtro
+    anti-DDoS cercano en vez del servidor.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.settimeout(timeout)
+        t = time.perf_counter()
+        try:  # el envío también falla con direcciones raras de la lista (WinError 10049)
+            s.sendto(b'\xff\xff\xff\xffTSource Engine Query\x00', (ip, qport))
+            s.recv(1400)  # vale la primera respuesta, sea el reto o la info
+        except OSError:
+            return None
+        return round((time.perf_counter() - t) * 1000)
 
 
 def fetch_json(url, timeout):
@@ -210,6 +234,7 @@ class App:
         self.sort, self.src, self.total, self.shown, self.done = [('players', True)], '', 0, 0, False
         self.maps, self.modlist, self.req, self.exc, self.picker, self.i18n = [], [], set(), set(), None, []
         self.hist, self.act, self.subwins, self.refreshing = [], {}, {}, set()
+        self.a2s = {}  # 'ip:puerto' -> ping del launcher, solo de los que bloquean el ICMP ('' = midiendo)
         self.refresh_pool = ThreadPoolExecutor(4)  # F5 con muchas filas: como mucho 4 consultas a DZSA a la vez
         try:
             with open(SETTINGS, encoding='utf-8') as f:
@@ -375,7 +400,7 @@ class App:
         s.map('Treeview', background=[('selected', c['sel'])], foreground=[('selected', c['selfg'])])
         s.configure('Treeview.Heading', background=c['head'], padding=4)
         s.map('Treeview.Heading', background=[('active', c['line'])])
-        for t in ('good', 'mid', 'bad'):
+        for t in ('good', 'mid', 'bad', 'approx'):
             self.tree.tag_configure(t, foreground=c[t])
         for cb in self.combos:  # la lista desplegable es un widget clásico: el estilo ttk no la pinta
             pd = self.root.tk.call('ttk::combobox::PopdownWindow', cb)
@@ -532,12 +557,14 @@ class App:
             grid = ttk.Frame(frm)
             grid.pack(fill='x', pady=8)
             ping_row = ttk.Frame(grid)  # el ping real con su botón-icono al lado
-            busy = i in self.refreshing
-            ttk.Label(ping_row, text=self.fmt('' if busy else self.ms.get(s.ip, ''))).pack(side='left')
+            text, tg = self.cell(i)
+            ttk.Label(ping_row, text=text).pack(side='left')
             btn = ttk.Button(ping_row, text='↻', style='Icon.Toolbutton', command=lambda: self.refresh_server(i))
             btn.pack(side='left', padx=(6, 0))
-            if busy:
+            if i in self.refreshing:
                 btn.state(['disabled'])  # sin cooldown: solo desactivado mientras pide los datos
+            if tg == 'approx':  # aviso discreto, en gris, de que no es el ping real
+                ttk.Label(ping_row, text=t('d_approx'), foreground=THEMES[self.theme]['approx']).pack(side='left')
             yes_no = lambda v: t('yes') if v else t('no')
             info = [(t('d_addr'), f"{s.ip}:{s.port}   ({t('d_qport')} {qport})"), (t('col_map'), s.map),
                     (t('col_players'), f"{s.players}/{s.max}   ({t('d_nonames')})"), (t('col_ping'), ping_row),
@@ -599,9 +626,11 @@ class App:
         self.redraw_server(i)
 
         def work():
+            qport = s.info['endpoint']['port']
             ms = ping(s.ip)
+            launcher = a2s_ping(s.ip, qport) if ms is None else None  # bloquea el ICMP: el del launcher
             try:
-                info = query_server(s.ip, s.info['endpoint']['port'])
+                info = query_server(s.ip, qport)
             except (OSError, ValueError):
                 info = None  # DZSA no contestó: se quedan los datos que había, pero el ping sí se actualiza
 
@@ -610,6 +639,8 @@ class App:
                 if info:
                     self.rows[i] = make_server(info)
                 self.redraw_server(i)
+            if ms is None:
+                self.q.put(('a2s', f'{s.ip}:{s.port}', launcher))
             self.q.put(('ping', s.ip, ms))  # también las otras filas con la misma IP
             self.q.put(('call', done))
         self.refresh_pool.submit(work)
@@ -619,16 +650,36 @@ class App:
             self.refresh_server(int(iid))
 
     def redraw_server(self, i):
-        s, iid = self.rows[i], str(i)
-        ms = '' if i in self.refreshing else self.ms.get(s.ip, '')
+        iid = str(i)
         if self.tree.exists(iid):
-            self.tree.item(iid, values=self.row_values(s, ms), tags=(tag(ms),))
+            self.tree.item(iid, values=self.row_values(i), tags=(self.cell(i)[1],))
         for win, rebuild in list(self.subwins.items()):
             if getattr(win, 'server', None) == i and win.winfo_exists():
                 rebuild()
 
-    def row_values(self, s, ms):
-        return (self.fmt(ms), f'{s.players}/{s.max}', self.fmt_act(s), s.name, s.map, s.fpp, s.mods,
+    def eff_ping(self, s):
+        """(ms, aprox): el ping real; si el servidor bloquea el ICMP, el del launcher. ms '' = midiendo, None = nada."""
+        ms = self.ms.get(s.ip, '')
+        if ms is None:
+            a = self.a2s.get(f'{s.ip}:{s.port}')
+            return a, a not in ('', None)
+        return ms, False
+
+    def cell(self, i):
+        """(texto, etiqueta de color) de la columna de ping de la fila i."""
+        if i in self.refreshing:
+            return self.t('measuring'), ''
+        ms, approx = self.eff_ping(self.rows[i])
+        return (f'≈ {ms} ms', 'approx') if approx else (self.fmt(ms), tag(ms))
+
+    def update_row_ping(self, iid):
+        text, tg = self.cell(int(iid))
+        self.tree.set(iid, 'ping', text)
+        self.tree.item(iid, tags=(tg,))
+
+    def row_values(self, i):
+        s = self.rows[i]
+        return (self.cell(i)[0], f'{s.players}/{s.max}', self.fmt_act(s), s.name, s.map, s.fpp, s.mods,
                 f'{s.ip}:{s.port}')
 
     def row_menu(self, e):
@@ -682,13 +733,24 @@ class App:
             self.q.put(('error', str(e)))
             return
         self.q.put(('rows', rows, src, hist))
-        players = Counter()
+        players, by_ip = Counter(), {}
         for s in rows:
             players[s.ip] += s.players
+            by_ip.setdefault(s.ip, []).append(s)
         with ThreadPoolExecutor(16) as ex:  # medido: con 32+ a la vez se pierden respuestas por el camino
             futs = {ex.submit(ping, ip): ip for ip, _ in players.most_common()}  # los más llenos primero
+            launcher = {}
             for f in as_completed(futs):
-                self.q.put(('ping', futs[f], f.result()))
+                ip, ms = futs[f], f.result()
+                if ms is None:  # bloquea el ICMP (~20 %): se mide como el launcher, servidor a servidor
+                    for s in by_ip[ip]:
+                        key = f'{ip}:{s.port}'
+                        self.q.put(('a2s', key, ''))  # antes que el ping: que la fila diga "midiendo"
+                        launcher[ex.submit(a2s_ping, ip, s.info['endpoint']['port'])] = key
+                self.q.put(('ping', ip, ms))
+            for f in as_completed(launcher):
+                self.q.put(('a2s', launcher[f], f.result()))
+        self.q.put(('done',))
 
     def set_rows(self, rows, src, hist):
         self.rows, self.src, self.hist = rows, src, hist
@@ -715,18 +777,20 @@ class App:
                     msg[1]()
                 elif msg[0] == 'rows':
                     self.set_rows(*msg[1:])
-                else:
-                    _, ip, ms = msg
-                    self.ms[ip] = ms
-                    for iid in self.by_ip.get(ip, ()):
-                        self.tree.set(iid, 'ping', self.fmt(ms))
-                        self.tree.item(iid, tags=(tag(ms),))
+                elif msg[0] == 'done':  # los filtros de ping dejaron pasar los que aún medían: volver a filtrar
+                    self.done = True
+                    if any(c == 'ping' for c, _ in self.sort) or num(self.max_ping) or self.hide_noresp.get():
+                        self.render()
+                else:  # ('ping', ip, ms) o ('a2s', 'ip:puerto', ms)
+                    kind, key, ms = msg
+                    if kind == 'ping':
+                        self.ms[key] = ms
+                    else:
+                        self.a2s[key] = ms
+                    for iid in self.by_ip.get(key.rsplit(':', 1)[0] if kind == 'a2s' else key, ()):
+                        self.update_row_ping(iid)
         except queue.Empty:
             pass
-        if self.rows and not self.done and len(self.ms) >= self.total:
-            self.done = True  # los filtros de ping dejaron pasar los que aún medían: volver a filtrar
-            if any(c == 'ping' for c, _ in self.sort) or num(self.max_ping) or self.hide_noresp.get():
-                self.render()
         self.update_status()
         self.root.after(200, self.poll)
 
@@ -759,7 +823,7 @@ class App:
         hide_pw, hide_nr, req, exc = self.hide_pw.get(), self.hide_noresp.get(), self.req, self.exc
 
         def keep(s):
-            ms = self.ms.get(s.ip, '')  # '' = aún midiendo, None = no responde
+            ms = self.eff_ping(s)[0]  # '' = aún midiendo, None = no responde a nada
             return ((text in s.name.lower() or text in s.map.lower())
                     and mapa in (None, s.map) and fpp in (None, s.fpp)
                     and modded in (0, 1 if s.mods == 0 else 2)
@@ -770,8 +834,8 @@ class App:
                     and not (max_ping and (ms is None or (ms != '' and ms > max_ping))))
 
         def ping_key(s):
-            ms = self.ms.get(s.ip)
-            return 99999 if ms is None else ms
+            ms = self.eff_ping(s)[0]
+            return 99999 if ms in ('', None) else ms
         keys = {'ping': ping_key, 'players': lambda s: s.players, 'act': lambda s: self.act.get(f'{s.ip}:{s.port}', -1),
                 'name': lambda s: s.name.lower(), 'map': lambda s: s.map.lower(), 'fpp': lambda s: s.fpp,
                 'mods': lambda s: s.mods, 'addr': lambda s: socket.inet_aton(s.ip)}
@@ -791,10 +855,8 @@ class App:
         self.tree.delete(*self.tree.get_children())
         self.by_ip, self.shown = {}, len(idx)
         for i in idx:
-            s = self.rows[i]
-            ms = '' if i in self.refreshing else self.ms.get(s.ip, '')
-            self.tree.insert('', 'end', iid=str(i), tags=(tag(ms),), values=self.row_values(s, ms))
-            self.by_ip.setdefault(s.ip, []).append(str(i))
+            self.tree.insert('', 'end', iid=str(i), tags=(self.cell(i)[1],), values=self.row_values(i))
+            self.by_ip.setdefault(self.rows[i].ip, []).append(str(i))
 
 
 if __name__ == '__main__':
@@ -802,7 +864,7 @@ if __name__ == '__main__':
         import tempfile
         assert all(len(v) == 2 for v in TEXT.values())
         assert ping('127.0.0.1') is not None
-        assert ping('192.0.2.1', timeout_ms=300) is None  # TEST-NET, nunca responde
+        assert ping('192.0.2.1', timeout_ms=300) is None and a2s_ping('192.0.2.1', 2303, 0.3) is None  # TEST-NET
         rows, src, ts = load_servers()
         assert rows and all(isinstance(s, Server) and s.players > 0 and len(s.modids) <= s.mods for s in rows)
         assert any(s.official for s in rows) and not all(s.official for s in rows)

@@ -44,7 +44,7 @@ Para comprobar que todo funciona en tu PC, abre una terminal en la carpeta y eje
 Al abrirse, carga la lista y mide el ping de los servidores **con al menos un jugador** (unos 2.000), empezando por los más llenos. Tarda unos 30 segundos; la barra de arriba muestra el progreso (`ping 850/1500`). El ping sale en color: **verde** < 100 ms, **amarillo** 100-169 ms, **rojo** 170 ms o más.
 
 - Mide 16 servidores a la vez: con más, muchas conexiones domésticas pierden respuestas y el resultado sería peor.
-- Alrededor del **20 % de los servidores bloquea el ping** y aparecen como *sin resp.* (por defecto se ocultan con *Ocultar sin respuesta*).
+- Alrededor del **20 % de los servidores bloquea el ping real**. Para esos se muestra el **ping del launcher**, en gris y con **≈** delante (por ejemplo `≈ 85 ms`): es la misma medición que hace DZSA Launcher y **puede ser menor que el real**. Solo los que no responden a ninguna de las dos mediciones aparecen como *sin resp.* (por defecto se ocultan con *Ocultar sin respuesta*).
 
 #### Filtros
 
@@ -129,7 +129,7 @@ El programa solo se conecta a `dayzsalauncher.com` (lista y datos de servidores)
 - **No se abre al hacer doble clic**: instala Python desde python.org con las opciones por defecto, o abre una terminal en la carpeta y ejecuta `python dayz_ping.pyw` para ver el error.
 - **`No module named tkinter`**: reinstala Python y marca *tcl/tk and IDLE*.
 - **Aparece `Error:` arriba**: no hay internet y tampoco está la lista de DZSA Launcher. Abre DZSA Launcher una vez o revisa tu conexión.
-- **Muchos *sin resp.***: es normal en un 20 % de servidores; si son casi todos, puede que un firewall o antivirus bloquee el ping (ICMP).
+- **Muchos `≈` o *sin resp.***: es normal en un 20 % de servidores; si son casi todos, puede que un firewall o antivirus bloquee el ping (ICMP).
 
 ### Licencia
 
@@ -175,7 +175,7 @@ To check that everything works on your PC, open a terminal in the folder and run
 On start it loads the list and measures the ping of the servers **with at least one player** (about 2,000), fullest first. It takes about 30 seconds; the top bar shows progress (`ping 850/1500`). Ping is colored: **green** < 100 ms, **yellow** 100-169 ms, **red** 170 ms or more.
 
 - It pings 16 servers at a time: with more, many home connections drop replies and the results get worse.
-- About **20 % of servers block ping** and show as *no resp.* (hidden by default with *Hide no response*).
+- About **20 % of servers block the real ping**. For those, the **launcher ping** is shown in grey with a leading **≈** (for example `≈ 85 ms`): it is the same measurement DZSA Launcher makes and **may be lower than the real one**. Only servers that answer neither measurement show as *no resp.* (hidden by default with *Hide no response*).
 
 #### Filters
 
@@ -260,7 +260,7 @@ The program only connects to `dayzsalauncher.com` (server list and server data) 
 - **Nothing happens on double-click**: install Python from python.org with the default options, or open a terminal in the folder and run `python dayz_ping.pyw` to see the error.
 - **`No module named tkinter`**: reinstall Python and check *tcl/tk and IDLE*.
 - **`Error:` at the top**: no internet and no DZSA Launcher list either. Open DZSA Launcher once or check your connection.
-- **Lots of *no resp.***: normal for about 20 % of servers; if it's nearly all of them, a firewall or antivirus may be blocking ping (ICMP).
+- **Lots of `≈` or *no resp.***: normal for about 20 % of servers; if it's nearly all of them, a firewall or antivirus may be blocking ping (ICMP).
 
 ### License
 
